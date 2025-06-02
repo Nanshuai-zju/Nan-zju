@@ -1,0 +1,626 @@
+import numpy as np
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.patches import Wedge
+import matplotlib
+
+# 使用Tkinter兼容的后端
+matplotlib.use('TkAgg')
+
+
+class InterestGroup:
+    """代表一个特定领域的利益集团"""
+
+    def __init__(self, name, ideal_allocation, influence, aggressiveness):
+        """
+        :param name: 利益集团名称
+        :param ideal_allocation: 理想分配比例 (0-1)
+        :param influence: 政治影响力 (1-10)
+        :param aggressiveness: 激进程度 (1-10)
+        """
+        self.name = name
+        self.ideal_allocation = ideal_allocation
+        self.influence = influence
+        self.aggressiveness = aggressiveness
+        self.satisfaction = 0.5  # 初始满意度
+
+    def calculate_satisfaction(self, actual_allocation):
+        """计算对实际分配的满意度"""
+        # 满意度基于实际分配与理想分配的接近程度
+        allocation_diff = abs(actual_allocation - self.ideal_allocation)
+        self.satisfaction = max(0, 1 - allocation_diff * 2)  # 当分配差0.5时满意度为0
+
+        # 加入随机因素模拟不确定性
+        self.satisfaction *= np.random.uniform(0.9, 1.1)
+        return self.satisfaction
+
+    def apply_pressure(self, actual_allocation):
+        """基于满意度施加政治压力"""
+        # 计算不满意程度
+        dissatisfaction = 1 - self.calculate_satisfaction(actual_allocation)
+
+        # 施加的压力 = 不满意程度 × 影响力 × 激进程度
+        pressure = dissatisfaction * self.influence * self.aggressiveness / 100
+
+        # 加入随机因素
+        pressure *= np.random.uniform(0.8, 1.2)
+        return pressure
+
+    def __str__(self):
+        return f"{self.name}集团: 理想比例={self.ideal_allocation:.0%}, 影响力={self.influence}, 激进性={self.aggressiveness}"
+
+
+class MedianVoter:
+    """代表中位选民"""
+
+    def __init__(self):
+        self.ideal_allocation = {
+            "教育": 0.22,
+            "医疗": 0.25,
+            "国防": 0.10,
+            "基建": 0.20,
+            "社会福利": 0.23
+        }
+        self.satisfaction = 0.5
+
+    def calculate_satisfaction(self, allocations):
+        """计算对分配方案的满意度"""
+        total_diff = 0
+        for sector, allocation in allocations.items():
+            total_diff += abs(allocation - self.ideal_allocation[sector])
+
+        # 平均差异越小，满意度越高
+        self.satisfaction = max(0, 1 - total_diff * 2)
+        return self.satisfaction
+
+
+class BudgetAllocationGame:
+    def __init__(self, total_budget=1000):
+        self.total_budget = total_budget
+        self.sectors = ["教育", "医疗", "国防", "基建", "社会福利"]
+
+        # 创建利益集团
+        self.interest_groups = [
+            InterestGroup("教育", 0.30, 8, 6),  # 理想30%预算
+            InterestGroup("医疗", 0.25, 9, 7),  # 理想25%预算
+            InterestGroup("国防", 0.20, 10, 9),  # 理想20%预算
+            InterestGroup("基建", 0.15, 7, 5),  # 理想15%预算
+            InterestGroup("社会福利", 0.28, 8, 8)  # 理想28%预算
+        ]
+
+        # 创建中位选民
+        self.median_voter = MedianVoter()
+
+        # 游戏状态
+        self.term = 0
+        self.support_rate = 50  # 初始支持率50%
+        self.budget_history = []
+        self.support_history = []
+        self.allocations = {
+            "教育": 0.20,
+            "医疗": 0.25,
+            "国防": 0.15,
+            "基建": 0.20,
+            "社会福利": 0.20
+        }  # 初始分配
+
+    def allocate_budget(self, allocations):
+        """玩家分配预算"""
+        self.allocations = allocations
+
+    def calculate_support_rate(self):
+        """计算支持率变化"""
+        allocations = self.allocations
+        total_pressure = 0
+
+        # 计算利益集团施加的压力
+        group_reactions = []
+        for group in self.interest_groups:
+            actual_alloc = allocations[group.name]
+            pressure = group.apply_pressure(actual_alloc)
+            total_pressure += pressure
+
+            # 记录集团反应
+            reaction = "强烈抗议" if pressure > 0.15 else (
+                "不满" if pressure > 0.08 else (
+                    "中立" if pressure > 0.03 else "满意"
+                )
+            )
+
+            group_reactions.append({
+                "name": group.name,
+                "reaction": reaction,
+                "satisfaction": group.satisfaction,
+                "pressure": pressure
+            })
+
+        # 计算选民满意度
+        voter_satisfaction = self.median_voter.calculate_satisfaction(allocations)
+
+        # 计算社会效益
+        social_benefit = 0
+        for sector, alloc in allocations.items():
+            # 简单模型：分配越接近理想值，效益越高
+            if sector == "教育":
+                ideal = 0.22
+            elif sector == "医疗":
+                ideal = 0.25
+            elif sector == "国防":
+                ideal = 0.10
+            elif sector == "基建":
+                ideal = 0.20
+            else:  # 社会福利
+                ideal = 0.23
+            social_benefit += 1 - abs(alloc - ideal)
+
+        social_benefit /= len(allocations)
+
+        # 计算支持率变化
+        # 基础变化：选民满意度 + 社会效益 - 利益集团压力
+        change = (voter_satisfaction * 30 + social_benefit * 20 - total_pressure * 25)
+
+        # 加入随机因素
+        change *= np.random.uniform(0.8, 1.2)
+
+        # 更新支持率
+        self.support_rate = max(10, min(90, self.support_rate + change))
+
+        # 保存支持率
+        self.support_history.append(self.support_rate)
+        self.budget_history.append(allocations.copy())
+
+        return {
+            "group_reactions": group_reactions,
+            "voter_satisfaction": voter_satisfaction,
+            "social_benefit": social_benefit,
+            "change": change,
+            "support_rate": self.support_rate
+        }
+
+    def next_term(self):
+        """进入下一任期"""
+        self.term += 1
+        return self.term
+
+    def plot_allocation(self, fig):
+        """绘制预算分配饼图"""
+        allocations = self.allocations
+        fig.clear()
+        labels = list(allocations.keys())
+        sizes = [alloc * 100 for alloc in allocations.values()]
+        colors = ['#ff9999', '#66b3ff', '#99ff99', '#ffcc99', '#c2c2f0']
+
+        ax = fig.add_subplot(111)
+        ax.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+        ax.axis('equal')
+        ax.set_title(f'任期 {self.term} 预算分配')
+        return fig
+
+    def plot_support_rate(self, fig):
+        """绘制支持率变化图"""
+        if not self.support_history:
+            return fig
+
+        fig.clear()
+        ax = fig.add_subplot(111)
+        terms = range(1, len(self.support_history) + 1)
+        ax.plot(terms, self.support_history, 'o-', markersize=8, linewidth=2)
+
+        # 添加标注
+        for i, rate in enumerate(self.support_history):
+            ax.annotate(f'{rate:.1f}%', (terms[i], rate),
+                        textcoords="offset points",
+                        xytext=(0, 10),
+                        ha='center')
+
+        ax.axhline(y=50, color='r', linestyle='--', alpha=0.5)
+        ax.set_xlabel('任期')
+        ax.set_ylabel('支持率 (%)')
+        ax.set_title('支持率变化趋势')
+        ax.set_ylim(0, 100)
+        ax.grid(True, alpha=0.3)
+        return fig
+
+    def plot_political_landscape(self, fig):
+        """绘制政治格局图"""
+        fig.clear()
+        ax = fig.add_subplot(111, polar=True)
+
+        # 绘制支持率
+        support_wedge = Wedge((0, 0), 0.6, 0, self.support_rate * 3.6,
+                              color='green', alpha=0.3, label='支持率')
+        ax.add_patch(support_wedge)
+
+        # 绘制反对率
+        oppose_wedge = Wedge((0, 0), 0.6, self.support_rate * 3.6, 360,
+                             color='red', alpha=0.3, label='反对率')
+        ax.add_patch(oppose_wedge)
+
+        # 绘制利益集团影响
+        angles = np.linspace(0, 2 * np.pi, len(self.interest_groups), endpoint=False)
+        for i, group in enumerate(self.interest_groups):
+            # 影响力越大，射线越长
+            radius = 0.2 + group.influence * 0.05
+            ax.plot([0, angles[i]], [0, radius], linewidth=group.aggressiveness / 2,
+                    label=f"{group.name}集团")
+
+            # 添加标注
+            ax.text(angles[i], radius + 0.05, group.name,
+                    ha='center', va='center', fontsize=9)
+
+        # 添加选民
+        ax.text(0, 0.1, "选民", ha='center', va='center',
+                fontsize=12, bbox=dict(facecolor='white', alpha=0.8))
+
+        # 设置图形属性
+        ax.set_yticklabels([])
+        ax.set_theta_zero_location('N')
+        ax.set_theta_direction(-1)
+        ax.set_title(f"任期 {self.term} 政治格局 (支持率: {self.support_rate:.1f}%)", pad=20)
+        plt.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
+        return fig
+
+
+class BudgetGameApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("预算分配挑战游戏")
+        self.root.geometry("1200x800")
+        self.root.configure(bg="#f0f0f0")
+
+        # 初始化游戏
+        self.game = BudgetAllocationGame(total_budget=1000)
+
+        # 创建主框架
+        self.main_frame = ttk.Frame(root)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # 创建顶部信息栏
+        self.create_top_bar()
+
+        # 创建分配控制面板
+        self.create_allocation_panel()
+
+        # 创建图表区域
+        self.create_charts_area()
+
+        # 创建反馈区域
+        self.create_feedback_area()
+
+        # 初始化界面
+        self.update_display()
+
+    def create_top_bar(self):
+        """创建顶部信息栏"""
+        top_frame = ttk.Frame(self.main_frame)
+        top_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # 游戏标题
+        title_label = ttk.Label(top_frame, text="预算分配挑战游戏", font=("Arial", 20, "bold"))
+        title_label.pack(side=tk.LEFT)
+
+        # 任期信息
+        self.term_label = ttk.Label(top_frame, text="任期: 0", font=("Arial", 14))
+        self.term_label.pack(side=tk.RIGHT, padx=20)
+
+        # 支持率信息
+        self.support_label = ttk.Label(top_frame, text="支持率: 50.0%", font=("Arial", 14))
+        self.support_label.pack(side=tk.RIGHT, padx=20)
+
+    def create_allocation_panel(self):
+        """创建预算分配面板"""
+        alloc_frame = ttk.LabelFrame(self.main_frame, text="预算分配 (总预算: 1000亿元)")
+        alloc_frame.pack(fill=tk.X, pady=10)
+
+        # 说明标签
+        help_label = ttk.Label(alloc_frame,
+                               text="请为以下领域分配预算比例(总和必须为100%):",
+                               font=("Arial", 10))
+        help_label.grid(row=0, column=0, columnspan=3, pady=5, sticky=tk.W)
+
+        # 创建比例输入滑块
+        self.sliders = {}
+        self.slider_vars = {}
+        row = 1
+
+        for sector in self.game.sectors:
+            # 标签
+            label = ttk.Label(alloc_frame, text=f"{sector}:", width=8)
+            label.grid(row=row, column=0, padx=5, pady=5, sticky=tk.W)
+
+            # 滑块
+            var = tk.DoubleVar(value=self.game.allocations[sector] * 100)
+            self.slider_vars[sector] = var
+
+            slider = ttk.Scale(alloc_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                               variable=var, length=200,
+                               command=lambda v, s=sector: self.update_slider_value(s))
+            slider.grid(row=row, column=1, padx=5, pady=5)
+            self.sliders[sector] = slider
+
+            # 数值显示
+            value_label = ttk.Label(alloc_frame, text=f"{var.get():.1f}%", width=6)
+            value_label.grid(row=row, column=2, padx=5, pady=5)
+            self.sliders[sector + "_label"] = value_label
+
+            row += 1
+
+        # 总比例标签
+        self.total_label = ttk.Label(alloc_frame, text="总比例: 0.0%", font=("Arial", 10, "bold"))
+        self.total_label.grid(row=row, column=0, columnspan=2, pady=10, sticky=tk.W)
+
+        # 按钮区域
+        button_frame = ttk.Frame(alloc_frame)
+        button_frame.grid(row=row, column=2, sticky=tk.E, pady=10)
+
+        # 提交按钮
+        submit_btn = ttk.Button(button_frame, text="提交预算分配", command=self.submit_allocation)
+        submit_btn.pack(side=tk.RIGHT, padx=5)
+
+        # 重置按钮
+        reset_btn = ttk.Button(button_frame, text="重置", command=self.reset_sliders)
+        reset_btn.pack(side=tk.RIGHT, padx=5)
+
+        # 自动分配按钮
+        auto_btn = ttk.Button(button_frame, text="自动分配", command=self.auto_allocate)
+        auto_btn.pack(side=tk.RIGHT, padx=5)
+
+        # 更新总比例
+        self.update_total_percentage()
+
+    def create_charts_area(self):
+        """创建图表显示区域"""
+        chart_frame = ttk.Frame(self.main_frame)
+        chart_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        # 预算分配饼图
+        pie_frame = ttk.LabelFrame(chart_frame, text="预算分配图")
+        pie_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+
+        self.pie_fig = plt.Figure(figsize=(5, 4), dpi=100)
+        self.pie_canvas = FigureCanvasTkAgg(self.pie_fig, master=pie_frame)
+        self.pie_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # 政治格局图
+        polar_frame = ttk.LabelFrame(chart_frame, text="政治格局图")
+        polar_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+
+        self.polar_fig = plt.Figure(figsize=(5, 4), dpi=100)
+        self.polar_canvas = FigureCanvasTkAgg(self.polar_fig, master=polar_frame)
+        self.polar_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def create_feedback_area(self):
+        """创建反馈信息区域"""
+        feedback_frame = ttk.LabelFrame(self.main_frame, text="分配结果反馈")
+        feedback_frame.pack(fill=tk.BOTH, pady=10)
+
+        # 创建文本区域
+        self.feedback_text = tk.Text(feedback_frame, height=10, wrap=tk.WORD)
+        self.feedback_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.feedback_text.config(state=tk.DISABLED)
+
+        # 创建支持率图表按钮
+        btn_frame = ttk.Frame(feedback_frame)
+        btn_frame.pack(fill=tk.X, pady=5)
+
+        history_btn = ttk.Button(btn_frame, text="查看支持率历史", command=self.show_support_history)
+        history_btn.pack(side=tk.RIGHT, padx=5)
+
+        next_term_btn = ttk.Button(btn_frame, text="进入下一任期", command=self.next_term)
+        next_term_btn.pack(side=tk.RIGHT, padx=5)
+
+    def update_slider_value(self, sector):
+        """更新滑块数值显示"""
+        value = self.slider_vars[sector].get()
+        self.sliders[sector + "_label"].config(text=f"{value:.1f}%")
+        self.update_total_percentage()
+
+    def update_total_percentage(self):
+        """更新总比例显示"""
+        total = sum(var.get() for var in self.slider_vars.values())
+        self.total_label.config(text=f"总比例: {total:.1f}%")
+
+    def reset_sliders(self):
+        """重置所有滑块"""
+        for sector in self.game.sectors:
+            self.slider_vars[sector].set(0)
+            self.sliders[sector + "_label"].config(text="0.0%")
+        self.update_total_percentage()
+
+    def auto_allocate(self):
+        """自动分配预算"""
+        # 随机分配但确保总和为100%
+        values = np.random.dirichlet(np.ones(5), size=1)[0] * 100
+        for i, sector in enumerate(self.game.sectors):
+            self.slider_vars[sector].set(values[i])
+            self.sliders[sector + "_label"].config(text=f"{values[i]:.1f}%")
+        self.update_total_percentage()
+
+    def validate_allocation(self):
+        """验证分配是否有效"""
+        total = sum(var.get() for var in self.slider_vars.values())
+        if abs(total - 100) > 0.1:  # 允许0.1%的误差
+            messagebox.showerror("分配错误", f"总比例必须为100%! 当前总和为: {total:.1f}%")
+            return False
+        return True
+
+    def submit_allocation(self):
+        """提交预算分配"""
+        if not self.validate_allocation():
+            return
+
+        # 获取分配比例
+        allocations = {}
+        for sector in self.game.sectors:
+            allocations[sector] = self.slider_vars[sector].get() / 100
+
+        # 更新游戏状态
+        self.game.allocate_budget(allocations)
+
+        # 计算支持率变化
+        result = self.game.calculate_support_rate()
+
+        # 更新显示
+        self.update_display(result)
+
+        # 显示反馈信息
+        self.show_feedback(result)
+
+    def next_term(self):
+        """进入下一任期"""
+        if self.game.term == 0 and not self.game.support_history:
+            messagebox.showinfo("提示", "请先提交预算分配!")
+            return
+
+        # 进入下一任期
+        term = self.game.next_term()
+
+        # 重置分配比例
+        self.reset_sliders()
+
+        # 更新显示
+        self.update_display()
+
+        # 检查游戏结束条件
+        if term >= 3:
+            self.end_game()
+
+    def update_display(self, result=None):
+        """更新界面显示"""
+        # 更新顶部信息
+        self.term_label.config(text=f"任期: {self.game.term}")
+        if result:
+            self.support_label.config(text=f"支持率: {result['support_rate']:.1f}%")
+        else:
+            self.support_label.config(text=f"支持率: {self.game.support_rate:.1f}%")
+
+        # 更新图表
+        self.game.plot_allocation(self.pie_fig)
+        self.pie_canvas.draw()
+
+        self.game.plot_political_landscape(self.polar_fig)
+        self.polar_canvas.draw()
+
+    def show_feedback(self, result):
+        """显示反馈信息"""
+        self.feedback_text.config(state=tk.NORMAL)
+        self.feedback_text.delete(1.0, tk.END)
+
+        # 添加反馈标题
+        self.feedback_text.insert(tk.END, f"=== 任期 {self.game.term} 分配结果 ===\n", "title")
+
+        # 添加预算分配信息
+        self.feedback_text.insert(tk.END, "\n预算分配结果:\n", "subtitle")
+        for sector, percent in self.game.allocations.items():
+            amount = self.game.total_budget * percent
+            self.feedback_text.insert(tk.END, f"  {sector}: {amount:.1f}亿元 ({percent:.1%})\n")
+
+        # 添加利益集团反应
+        self.feedback_text.insert(tk.END, "\n利益集团反应:\n", "subtitle")
+        for reaction in result['group_reactions']:
+            color = "red" if "抗议" in reaction['reaction'] or "不满" in reaction['reaction'] else "green"
+            self.feedback_text.insert(tk.END,
+                                      f"  {reaction['name']}集团: {reaction['reaction']} ",
+                                      color)
+            self.feedback_text.insert(tk.END,
+                                      f"(满意度: {reaction['satisfaction']:.1%}, 压力: {reaction['pressure']:.3f})\n")
+
+        # 添加选民满意度
+        self.feedback_text.insert(tk.END, "\n中位选民满意度: ", "subtitle")
+        self.feedback_text.insert(tk.END, f"{result['voter_satisfaction']:.1%}\n")
+
+        # 添加社会效益
+        self.feedback_text.insert(tk.END, "社会效益指数: ", "subtitle")
+        self.feedback_text.insert(tk.END, f"{result['social_benefit']:.1%}\n")
+
+        # 添加支持率变化
+        self.feedback_text.insert(tk.END, "\n支持率变化: ", "subtitle")
+        change_text = f"{'+' if result['change'] >= 0 else ''}{result['change']:.1f}%\n"
+        color = "green" if result['change'] >= 0 else "red"
+        self.feedback_text.insert(tk.END, change_text, color)
+
+        self.feedback_text.insert(tk.END, f"当前支持率: {result['support_rate']:.1f}%\n", "bold")
+
+        # 添加状态信息
+        if result['support_rate'] <= 20:
+            self.feedback_text.insert(tk.END, "\n⚠️ 警告：你的支持率过低！可能面临弹劾风险。\n", "warning")
+        elif result['support_rate'] >= 80:
+            self.feedback_text.insert(tk.END, "\n🎉 恭喜：你的支持率非常高！连任在望。\n", "success")
+
+        # 配置文本样式
+        self.feedback_text.tag_config("title", font=("Arial", 12, "bold"))
+        self.feedback_text.tag_config("subtitle", font=("Arial", 10, "bold"))
+        self.feedback_text.tag_config("bold", font=("Arial", 10, "bold"))
+        self.feedback_text.tag_config("red", foreground="red")
+        self.feedback_text.tag_config("green", foreground="green")
+        self.feedback_text.tag_config("warning", foreground="orange", font=("Arial", 10, "bold"))
+        self.feedback_text.tag_config("success", foreground="green", font=("Arial", 10, "bold"))
+
+        self.feedback_text.config(state=tk.DISABLED)
+
+    def show_support_history(self):
+        """显示支持率历史图表"""
+        if not self.game.support_history:
+            messagebox.showinfo("提示", "还没有历史数据!")
+            return
+
+        history_window = tk.Toplevel(self.root)
+        history_window.title("支持率历史")
+        history_window.geometry("600x500")
+
+        fig = plt.Figure(figsize=(6, 5), dpi=100)
+        self.game.plot_support_rate(fig)
+
+        canvas = FigureCanvasTkAgg(fig, master=history_window)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def end_game(self):
+        """结束游戏并显示结果"""
+        # 创建结束游戏窗口
+        end_window = tk.Toplevel(self.root)
+        end_window.title("游戏结束")
+        end_window.geometry("600x500")
+
+        # 添加标题
+        title_label = ttk.Label(end_window, text="游戏结束!", font=("Arial", 16, "bold"))
+        title_label.pack(pady=10)
+
+        # 显示最终支持率
+        final_rate = self.game.support_rate
+        rate_label = ttk.Label(end_window, text=f"最终支持率: {final_rate:.1f}%", font=("Arial", 14))
+        rate_label.pack(pady=5)
+
+        # 显示评价
+        if final_rate >= 70:
+            result_text = "太棒了！你是一位杰出的财政部长，成功平衡了各方利益！"
+            color = "green"
+        elif final_rate >= 50:
+            result_text = "做得不错！你成功完成了任期，但仍有改进空间。"
+            color = "blue"
+        else:
+            result_text = "很遗憾，你未能平衡各方利益，下次努力吧！"
+            color = "red"
+
+        result_label = ttk.Label(end_window, text=result_text, font=("Arial", 12), foreground=color)
+        result_label.pack(pady=10)
+
+        # 显示支持率历史图表
+        fig = plt.Figure(figsize=(5, 4), dpi=100)
+        self.game.plot_support_rate(fig)
+
+        canvas = FigureCanvasTkAgg(fig, master=end_window)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # 添加关闭按钮
+        close_btn = ttk.Button(end_window, text="关闭", command=self.root.destroy)
+        close_btn.pack(pady=10)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = BudgetGameApp(root)
+    root.mainloop()
